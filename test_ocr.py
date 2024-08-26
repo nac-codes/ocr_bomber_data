@@ -2,6 +2,7 @@ import cv2
 import pytesseract
 from pytesseract import Output
 from PIL import Image
+import argparse
 
 def extract_text_with_hocr(image_path):
     # Load the image using OpenCV
@@ -33,8 +34,12 @@ def extract_text_with_hocr(image_path):
     image_pil.save(output_image_path)
     print(f"HOCR output saved as 'output.hocr' and image with bounding boxes saved as '{output_image_path}'.")
 
-# Define the file path
-image_path = '/Users/chim/Working/Thesis/Attack_Images/BOX_1/BOOK_2_OIL/IMG_0386.JPG'
+# get file path with argparse
+parser = argparse.ArgumentParser(description='Extract text from an image using Tesseract OCR with HOCR output.')
+parser.add_argument('image_path', type=str, help='The path to the image file')
+
+args = parser.parse_args()
+image_path = args.image_path
 
 # Call the function with the specified image path
 extract_text_with_hocr(image_path)
