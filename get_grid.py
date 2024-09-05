@@ -5,9 +5,11 @@ from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from itertools import combinations
 from tqdm import tqdm
 import sys
+import os
 import logging
 import matplotlib.pyplot as plt
 from math import atan2, degrees
+from scipy.stats import linregress
 from scipy.optimize import linear_sum_assignment
 
 
@@ -144,11 +146,11 @@ def find_best_vertical_grid_match(vertical_lines, column_widths, image):
         cv2.line(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
     
     # Show the image with the clusters
-    plt.figure(figsize=(20, 10))
-    plt.imshow(cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB))
-    plt.title('Detected Vertical Line Clusters')
-    plt.axis('off')
-    plt.show()
+    # plt.figure(figsize=(20, 10))
+    # plt.imshow(cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB))
+    # plt.title('Detected Vertical Line Clusters')
+    # plt.axis('off')
+    # plt.show()
 
     # check if the number of vertical lines is less than the number of columns
     if len(clustered_lines) < len(column_widths) + 1:
@@ -223,11 +225,11 @@ def find_best_horizontal_grid_match(horizontal_lines, row_heights, image):
         cv2.line(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 255), 2)
     
     # Show the image with the clusters
-    plt.figure(figsize=(20, 10))
-    plt.imshow(cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB))
-    plt.title('Detected Horizontal Line Clusters')
-    plt.axis('off')
-    plt.show()
+    # plt.figure(figsize=(20, 10))
+    # plt.imshow(cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB))
+    # plt.title('Detected Horizontal Line Clusters')
+    # plt.axis('off')
+    # plt.show()
 
     # Check if the number of horizontal lines is less than the number of rows
     if len(clustered_lines) < len(row_heights):
@@ -308,10 +310,231 @@ def visualize_results(image, vertical_match, horizontal_match):
     plt.axis('off')
     plt.show()
 
+# def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_heights, output_dir):
+#     # Ensure output directory exists
+#     os.makedirs(output_dir, exist_ok=True)
+
+#     # Sort lines by x and y coordinates
+#     vertical_lines = sorted(vertical_lines, key=lambda line: (line[0] + line[2]) / 2)
+#     horizontal_lines = sorted(horizontal_lines, key=lambda line: (line[1] + line[3]) / 2)
+
+#     # Interpolate missing first and last vertical lines
+#     image_width = image.shape[1]
+#     image_height = image.shape[0]
+
+#     # Calculate scaling factor
+#     detected_width = vertical_lines[-1][0] - vertical_lines[0][0]
+#     expected_width = sum(column_widths[1:-1])  # Exclude first and last columns
+#     scale_factor = detected_width / expected_width
+
+#     # Interpolate first vertical line (Day column)
+#     first_line_x = vertical_lines[0][0] - column_widths[0] * scale_factor
+#     first_line = [first_line_x, 0, first_line_x, image_height]
+#     vertical_lines.insert(0, first_line)
+
+#     # Interpolate last vertical line (Total Tons column)
+#     last_line_x = vertical_lines[-1][2] + column_widths[-1] * scale_factor
+#     last_line = [last_line_x, 0, last_line_x, image_height]
+#     vertical_lines.append(last_line)
+
+#     # Define column names
+#     column_names = [
+#         "Day", "Month", "Year", "Time_of_Attack", "Air_Force", "Group_Squadron_Number",
+#         "Number_of_Aircraft_Bombing", "Altitude_of_Release", "Sighting", "Visibility_of_Target",
+#         "Target_Priority", "HE_Bombs_Number", "HE_Bombs_Size", "HE_Bombs_Tons",
+#         "Fuzing_Nose", "Fuzing_Tail", "Incendiary_Bombs_Number", "Incendiary_Bombs_Size",
+#         "Incendiary_Bombs_Tons", "Fragmentation_Bombs_Number", "Fragmentation_Bombs_Size",
+#         "Fragmentation_Bombs_Tons", "Total_Tons"
+#     ]
+
+#     # Specific regions
+#     regions = [
+#         ("Target_Location", 2, 0, 2, 7),  # Row 3, Columns 1-8
+#         ("Target_Name", 3, 0, 3, 7),  # Row 4, Columns 1-8
+#         ("Latitude", 2, 10, 2, 13),  # Row 3, Columns 11-14
+#         ("Longitude", 2, 13, 2, 15),  # Row 3, Columns 14-16
+#         ("Target_Code_Part1", 2, 16, 2, 16),  # Row 3, Column 17
+#         ("Target_Code_Part2", 2, 17, 2, 19),  # Row 3, Columns 18-20
+#     ]
+
+#     # Function to get coordinates for a cell
+#     def get_cell_coords(row, col):
+#         x1, y1, _, _ = vertical_lines[col]
+#         _, y2, x2, _ = vertical_lines[col + 1]
+#         top = horizontal_lines[row][1]
+#         bottom = horizontal_lines[row + 1][3]
+#         return int(x1), int(top), int(x2), int(bottom)
+
+#     # Splice specific regions
+#     for name, start_row, start_col, end_row, end_col in regions:
+#         logger.info(f"Splicing region: {name}")
+#         x1, y1, _, _ = get_cell_coords(start_row, start_col)
+#         logger.info(f"Coordinates: {x1}, {y1}")
+#         _, _, x2, y2 = get_cell_coords(end_row, end_col)
+#         logger.info(f"Coordinates: {x2}, {y2}")
+#         region = image[y1:y2, x1:x2]
+#         # display the region
+#         plt.figure(figsize=(10, 5))
+#         plt.imshow(cv2.cvtColor(region, cv2.COLOR_BGR2RGB))
+#         plt.title(f"Region: {name}")
+#         plt.axis('off')
+#         plt.show()
+        
+#         cv2.imwrite(os.path.join(output_dir, f"{name}.png"), region)
+
+#     # Splice data rows
+#     for row in range(7, len(horizontal_lines) - 1):  # Start from row 8 (index 7)
+#         for col, name in enumerate(column_names):
+#             x1, y1, x2, y2 = get_cell_coords(row, col)
+#             cell = image[y1:y2, x1:x2]
+#             cv2.imwrite(os.path.join(output_dir, f"entry_{row-6}_{name}.png"), cell)
+
+#     print(f"Images saved in {output_dir}")
+
+def add_boundary_columns(vertical_lines, column_widths, image_shape):
+    """
+    Add the first and last columns to the vertical lines based on the provided column widths.
+    
+    Args:
+    vertical_lines (list): List of vertical lines, each represented as [x1, y1, x2, y2].
+    column_widths (list): List of column widths including the first and last columns.
+    image_shape (tuple): Shape of the image (height, width).
+    
+    Returns:
+    list: Updated list of vertical lines including the interpolated first and last columns.
+    """
+    image_height, image_width = image_shape[:2]
+    
+    # Sort vertical lines
+    vertical_lines = sorted(vertical_lines, key=lambda line: (line[0] + line[2]) / 2)
+    
+    # Calculate scaling factor
+    detected_width = vertical_lines[-1][0] - vertical_lines[0][0]
+    expected_width = sum(column_widths[1:-1])  # Exclude first and last columns
+    scale_factor = detected_width / expected_width
+    
+    logger.info(f"Detected width: {detected_width}, Expected width: {expected_width}")
+    logger.info(f"Scale factor: {scale_factor}")
+    
+    # Interpolate first vertical line (Day column)
+    first_line_x = max(0, vertical_lines[0][0] - column_widths[0] * scale_factor)
+    first_line = [first_line_x, 0, first_line_x, image_height]
+    
+    # Interpolate last vertical line (Total Tons column)
+    last_line_x = min(image_width, vertical_lines[-1][2] + column_widths[-1] * scale_factor)
+    last_line = [last_line_x, 0, last_line_x, image_height]
+    
+    # Add new lines to the list
+    updated_vertical_lines = [first_line] + vertical_lines + [last_line]
+    
+    logger.info(f"Added boundary columns. Total vertical lines: {len(updated_vertical_lines)}")
+    
+    return updated_vertical_lines
+
+def line_intersection(line1, line2):
+    x1, y1, x2, y2 = line1
+    x3, y3, x4, y4 = line2
+    det = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if det == 0:
+        return None  # Lines are parallel
+    px = ((x1*y2 - y1*x2) * (x3 - x4) - (x1 - x2) * (x3*y4 - y3*x4)) / det
+    py = ((x1*y2 - y1*x2) * (y3 - y4) - (y1 - y2) * (x3*y4 - y3*x4)) / det
+    return int(px), int(py)
+
+def four_point_transform(image, pts):
+    rect = np.array(pts, dtype="float32")
+    (tl, tr, br, bl) = rect
+
+    # Compute the width of the new image
+    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+    maxWidth = max(int(widthA), int(widthB))
+
+    # Compute the height of the new image
+    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+    maxHeight = max(int(heightA), int(heightB))
+
+    # Construct set of destination points
+    dst = np.array([
+        [0, 0],
+        [maxWidth - 1, 0],
+        [maxWidth - 1, maxHeight - 1],
+        [0, maxHeight - 1]], dtype="float32")
+
+    # Compute the perspective transform matrix and apply it
+    M = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
+
+    return warped
+
+def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_heights, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
+
+    image_height, image_width = image.shape[:2]
+    logger.info(f"Image dimensions: {image_width}x{image_height}")
+
+    # Add boundary columns
+    vertical_lines = add_boundary_columns(vertical_lines, column_widths, image.shape)
+
+    # Sort horizontal lines
+    horizontal_lines = sorted(horizontal_lines, key=lambda line: (line[1] + line[3]) / 2)
+
+    column_names = [
+        "Day", "Month", "Year", "Time_of_Attack", "Air_Force", "Group_Squadron_Number",
+        "Number_of_Aircraft_Bombing", "Altitude_of_Release", "Sighting", "Visibility_of_Target",
+        "Target_Priority", "HE_Bombs_Number", "HE_Bombs_Size", "HE_Bombs_Tons",
+        "Fuzing_Nose", "Fuzing_Tail", "Incendiary_Bombs_Number", "Incendiary_Bombs_Size",
+        "Incendiary_Bombs_Tons", "Fragmentation_Bombs_Number", "Fragmentation_Bombs_Size",
+        "Fragmentation_Bombs_Tons", "Total_Tons"
+    ]
+
+    regions = [
+        ("Target_Location", 2, 0, 2, 7),
+        ("Target_Name", 3, 0, 3, 7),
+        ("Latitude", 2, 10, 2, 13),
+        ("Longitude", 2, 13, 2, 15),
+        ("Target_Code_Part1", 2, 16, 2, 16),
+        ("Target_Code_Part2", 2, 17, 2, 19),
+    ]
+
+    def get_cell_polygon(row, col):
+        top_left = line_intersection(vertical_lines[col], horizontal_lines[row])
+        top_right = line_intersection(vertical_lines[col+1], horizontal_lines[row])
+        bottom_right = line_intersection(vertical_lines[col+1], horizontal_lines[row+1])
+        bottom_left = line_intersection(vertical_lines[col], horizontal_lines[row+1])
+        return [top_left, top_right, bottom_right, bottom_left]
+
+    def save_region(name, polygon):
+        if any(pt is None for pt in polygon):
+            logger.warning(f"Invalid polygon for {name}: {polygon}")
+            return
+        region = four_point_transform(image, polygon)
+        if region.size == 0:
+            logger.warning(f"Empty region for {name}")
+            return
+        cv2.imwrite(os.path.join(output_dir, f"{name}.png"), region)
+        logger.info(f"Saved {name}.png")
+
+    for name, start_row, start_col, end_row, end_col in regions:
+        logger.info(f"Splicing region: {name}")
+        polygon = [
+            line_intersection(vertical_lines[start_col], horizontal_lines[start_row]),
+            line_intersection(vertical_lines[end_col+1], horizontal_lines[start_row]),
+            line_intersection(vertical_lines[end_col+1], horizontal_lines[end_row+1]),
+            line_intersection(vertical_lines[start_col], horizontal_lines[end_row+1])
+        ]
+        save_region(name, polygon)
+
+    for row in range(7, len(horizontal_lines) - 1):
+        for col, name in enumerate(column_names):
+            polygon = get_cell_polygon(row, col)
+            save_region(f"entry_{row-6}_{name}", polygon)
+
+    logger.info(f"Image splicing completed. Results saved in {output_dir}")
+
 # Main script (example usage)
 if __name__ == "__main__":
-    import sys
-    
     image_path = sys.argv[1]
     image = cv2.imread(image_path)
     
@@ -322,6 +545,8 @@ if __name__ == "__main__":
         129, 83, 224, 125, 240, 190, 170, 87, 81, 87, 211, 126, 257, 85, 126, 215, 121, 254, 205, 125, 205
         # , 215  # Last column (Total Tons)
     ]
+    # print out the number of columns
+    print(f"Number of columns: {len(column_widths)}")
 
     # row_heights = [
     # 93, 93, 92, 89, 30,  # Rows, Blank, Target, Location, Buffer
@@ -334,6 +559,7 @@ if __name__ == "__main__":
     58, 55, 56,  # Header Rows
     90, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87  # Data Rows
     ]
+    print(f"Number of rows: {len(row_heights)}")
 
 
     vertical_match, vertical_error = find_best_vertical_grid_match(vertical_lines, column_widths, image)
@@ -343,3 +569,13 @@ if __name__ == "__main__":
     
     print(f"Vertical match error: {vertical_error}")
     print(f"Horizontal match error: {horizontal_error}")
+
+    # check if the correct number of vertical and horizontal lines were found, if not exit with error code 1
+    if len(vertical_match) != len(column_widths) + 1 or len(horizontal_match) != len(row_heights) + 1:
+        # print the number of vertical and horizontal lines found
+        logger.error(f"Incorrect number of vertical or horizontal lines found: {len(vertical_match)}, {len(horizontal_match)}")
+        sys.exit(1)
+
+    # Splice the image
+    output_dir = image_path.replace('.JPG', '_output')
+    splice_image(image, vertical_match, horizontal_match, column_widths, row_heights, output_dir)
