@@ -11,10 +11,12 @@ import matplotlib.pyplot as plt
 from math import atan2, degrees
 from scipy.stats import linregress
 from scipy.optimize import linear_sum_assignment
+from scipy.ndimage import label
 
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(filename='grid_getting_log.txt', filemode='w', level=logging.DEBUG,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def detect_grid_lines(image, visualize=True):
@@ -97,8 +99,20 @@ def calculate_midpoint(line):
     x1, y1, x2, y2 = line
     return (x1 + x2) / 2, (y1 + y2) / 2
 
+def adjust_line_to_angle(line, mean_angle_degrees):
+    x_mid, y_mid = calculate_midpoint(line)
+    length = math.hypot(line[2] - line[0], line[3] - line[1])
+    mean_angle_radians = math.radians(mean_angle_degrees)
+    dx = (length / 2) * math.cos(mean_angle_radians)
+    dy = (length / 2) * math.sin(mean_angle_radians)
+    x1_new = x_mid - dx
+    y1_new = y_mid - dy
+    x2_new = x_mid + dx
+    y2_new = y_mid + dy
+    return [x1_new, y1_new, x2_new, y2_new]
+
 def cluster_lines_by_midpoint(lines, distance_threshold=10):
-    logger.info("Clustering lines by midpoint")
+    logger.info("Clustering lines by midpoint and adjusting to mean angle")
     midpoints = [calculate_midpoint(line) for line in lines]
     
     if len(midpoints) < 2:
@@ -111,17 +125,25 @@ def cluster_lines_by_midpoint(lines, distance_threshold=10):
         clustered_lines[cluster-1].append(line)
     
     mean_lines = []
-    for cluster in clustered_lines:
+    for idx, cluster in enumerate(clustered_lines):
         if cluster:
-            # Calculate median x and y values for start and end points
-            x1_median = np.median([line[0] for line in cluster])
-            y1_median = np.median([line[1] for line in cluster])
-            x2_median = np.median([line[2] for line in cluster])
-            y2_median = np.median([line[3] for line in cluster])
-            
+            # Calculate mean angle
+            angles = [calculate_line_angle(line) for line in cluster]
+            mean_angle = np.mean(angles)
+
+            # Adjust lines to have mean angle, preserving midpoint
+            adjusted_lines = [adjust_line_to_angle(line, mean_angle) for line in cluster]
+
+            # Compute median x and y values for start and end points of adjusted lines
+            x1_median = np.median([line[0] for line in adjusted_lines])
+            y1_median = np.median([line[1] for line in adjusted_lines])
+            x2_median = np.median([line[2] for line in adjusted_lines])
+            y2_median = np.median([line[3] for line in adjusted_lines])
+
             mean_line = [x1_median, y1_median, x2_median, y2_median]
             mean_lines.append(mean_line)
-    
+            logger.debug(f"Cluster {idx+1}: Mean angle adjusted to {mean_angle:.2f} degrees")
+
     logger.info(f"Found {len(mean_lines)} clusters")
     return mean_lines
 
@@ -139,19 +161,6 @@ def find_best_vertical_grid_match(vertical_lines, column_widths, image):
     parallel_lines = find_parallel_lines(vertical_lines)
     clustered_lines = cluster_lines_by_midpoint(parallel_lines)
     
-    # Display the clusters of vertical lines
-    debug_image = image.copy()
-    for line in clustered_lines:
-        x1, y1, x2, y2 = line
-        cv2.line(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-    
-    # Show the image with the clusters
-    # plt.figure(figsize=(20, 10))
-    # plt.imshow(cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB))
-    # plt.title('Detected Vertical Line Clusters')
-    # plt.axis('off')
-    # plt.show()
-
     # check if the number of vertical lines is less than the number of columns
     if len(clustered_lines) < len(column_widths) + 1:
         logger.warning("Number of vertical lines is less than the number of columns")
@@ -218,19 +227,6 @@ def find_best_horizontal_grid_match(horizontal_lines, row_heights, image):
     parallel_lines = find_parallel_lines(horizontal_lines)
     clustered_lines = cluster_lines_by_midpoint(parallel_lines)
     
-    # Display the clusters of horizontal lines
-    debug_image = image.copy()
-    for line in clustered_lines:
-        x1, y1, x2, y2 = line
-        cv2.line(debug_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 255), 2)
-    
-    # Show the image with the clusters
-    # plt.figure(figsize=(20, 10))
-    # plt.imshow(cv2.cvtColor(debug_image, cv2.COLOR_BGR2RGB))
-    # plt.title('Detected Horizontal Line Clusters')
-    # plt.axis('off')
-    # plt.show()
-
     # Check if the number of horizontal lines is less than the number of rows
     if len(clustered_lines) < len(row_heights):
         logger.warning("Number of horizontal lines is less than the number of rows")
@@ -295,14 +291,14 @@ def visualize_results(image, vertical_match, horizontal_match):
         for i, line in enumerate(vertical_match):
             color = (0, 255, 0) if i == 0 else (0, 0, 255) if i == len(vertical_match)-1 else (255, 0, 0)
             # draw the whole line
-            cv2.line(result, (int(line[0]), int(line[1])), (int(line[2]), int(line[3]),), color, 2)
+            cv2.line(result, (int(line[0]), int(line[1])), (int(line[2]), int(line[3])), color, 2)
 
     # Draw matched horizontal grid lines
     if horizontal_match:
         for i, line in enumerate(horizontal_match):
             color = (0, 255, 0) if i == 0 else (0, 0, 255) if i == len(horizontal_match)-1 else (255, 255, 0)
             # draw the whole line
-            cv2.line(result, (int(line[0]), int(line[1])), (int(line[2]), int(line[3]),), color, 2)
+            cv2.line(result, (int(line[0]), int(line[1])), (int(line[2]), int(line[3])), color, 2)
 
     plt.figure(figsize=(20, 10))
     plt.imshow(cv2.cvtColor(result, cv2.COLOR_BGR2RGB))
@@ -310,86 +306,6 @@ def visualize_results(image, vertical_match, horizontal_match):
     plt.axis('off')
     plt.show()
 
-# def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_heights, output_dir):
-#     # Ensure output directory exists
-#     os.makedirs(output_dir, exist_ok=True)
-
-#     # Sort lines by x and y coordinates
-#     vertical_lines = sorted(vertical_lines, key=lambda line: (line[0] + line[2]) / 2)
-#     horizontal_lines = sorted(horizontal_lines, key=lambda line: (line[1] + line[3]) / 2)
-
-#     # Interpolate missing first and last vertical lines
-#     image_width = image.shape[1]
-#     image_height = image.shape[0]
-
-#     # Calculate scaling factor
-#     detected_width = vertical_lines[-1][0] - vertical_lines[0][0]
-#     expected_width = sum(column_widths[1:-1])  # Exclude first and last columns
-#     scale_factor = detected_width / expected_width
-
-#     # Interpolate first vertical line (Day column)
-#     first_line_x = vertical_lines[0][0] - column_widths[0] * scale_factor
-#     first_line = [first_line_x, 0, first_line_x, image_height]
-#     vertical_lines.insert(0, first_line)
-
-#     # Interpolate last vertical line (Total Tons column)
-#     last_line_x = vertical_lines[-1][2] + column_widths[-1] * scale_factor
-#     last_line = [last_line_x, 0, last_line_x, image_height]
-#     vertical_lines.append(last_line)
-
-#     # Define column names
-#     column_names = [
-#         "Day", "Month", "Year", "Time_of_Attack", "Air_Force", "Group_Squadron_Number",
-#         "Number_of_Aircraft_Bombing", "Altitude_of_Release", "Sighting", "Visibility_of_Target",
-#         "Target_Priority", "HE_Bombs_Number", "HE_Bombs_Size", "HE_Bombs_Tons",
-#         "Fuzing_Nose", "Fuzing_Tail", "Incendiary_Bombs_Number", "Incendiary_Bombs_Size",
-#         "Incendiary_Bombs_Tons", "Fragmentation_Bombs_Number", "Fragmentation_Bombs_Size",
-#         "Fragmentation_Bombs_Tons", "Total_Tons"
-#     ]
-
-#     # Specific regions
-#     regions = [
-#         ("Target_Location", 2, 0, 2, 7),  # Row 3, Columns 1-8
-#         ("Target_Name", 3, 0, 3, 7),  # Row 4, Columns 1-8
-#         ("Latitude", 2, 10, 2, 13),  # Row 3, Columns 11-14
-#         ("Longitude", 2, 13, 2, 15),  # Row 3, Columns 14-16
-#         ("Target_Code_Part1", 2, 16, 2, 16),  # Row 3, Column 17
-#         ("Target_Code_Part2", 2, 17, 2, 19),  # Row 3, Columns 18-20
-#     ]
-
-#     # Function to get coordinates for a cell
-#     def get_cell_coords(row, col):
-#         x1, y1, _, _ = vertical_lines[col]
-#         _, y2, x2, _ = vertical_lines[col + 1]
-#         top = horizontal_lines[row][1]
-#         bottom = horizontal_lines[row + 1][3]
-#         return int(x1), int(top), int(x2), int(bottom)
-
-#     # Splice specific regions
-#     for name, start_row, start_col, end_row, end_col in regions:
-#         logger.info(f"Splicing region: {name}")
-#         x1, y1, _, _ = get_cell_coords(start_row, start_col)
-#         logger.info(f"Coordinates: {x1}, {y1}")
-#         _, _, x2, y2 = get_cell_coords(end_row, end_col)
-#         logger.info(f"Coordinates: {x2}, {y2}")
-#         region = image[y1:y2, x1:x2]
-#         # display the region
-#         plt.figure(figsize=(10, 5))
-#         plt.imshow(cv2.cvtColor(region, cv2.COLOR_BGR2RGB))
-#         plt.title(f"Region: {name}")
-#         plt.axis('off')
-#         plt.show()
-        
-#         cv2.imwrite(os.path.join(output_dir, f"{name}.png"), region)
-
-#     # Splice data rows
-#     for row in range(7, len(horizontal_lines) - 1):  # Start from row 8 (index 7)
-#         for col, name in enumerate(column_names):
-#             x1, y1, x2, y2 = get_cell_coords(row, col)
-#             cell = image[y1:y2, x1:x2]
-#             cv2.imwrite(os.path.join(output_dir, f"entry_{row-6}_{name}.png"), cell)
-
-#     print(f"Images saved in {output_dir}")
 
 def add_boundary_columns(vertical_lines, column_widths, image_shape):
     """
@@ -431,6 +347,58 @@ def add_boundary_columns(vertical_lines, column_widths, image_shape):
     
     return updated_vertical_lines
 
+def adjust_lines_to_median_slope(match, deviation_threshold=1):
+    """
+    Adjusts lines to conform to the median slope if they deviate too much.
+    
+    Args:
+    match (list): List of lines, each represented as [x1, y1, x2, y2].
+    deviation_threshold (float): Number of standard deviations from median to allow.
+    
+    Returns:
+    list: Adjusted list of lines with slopes conforming to the median slope.
+    """
+    # Calculate the slope and midpoint of each line
+    slopes = []
+    midpoints = []
+    for line in match:
+        x1, y1, x2, y2 = line
+        if x2 - x1 != 0:
+            slope = (y2 - y1) / (x2 - x1)
+        else:
+            slope = float('inf')  # Vertical line
+        slopes.append(slope)
+        midpoints.append(((x1 + x2) / 2, (y1 + y2) / 2))
+    
+    # Calculate median slope and standard deviation
+    median_slope = np.median(slopes)
+    slope_std = np.std(slopes)
+    
+    # Adjust the lines that deviate too much from the median slope
+    adjusted_match = []
+    for (x_mid, y_mid), slope in zip(midpoints, slopes):
+        if abs(slope - median_slope) > deviation_threshold * slope_std:
+            # Use the median slope to calculate new endpoints
+            if median_slope != float('inf'):
+                half_length = np.sqrt(((match[0][2] - match[0][0])**2 + (match[0][3] - match[0][1])**2) / 4)
+                dx = half_length / np.sqrt(1 + median_slope**2)
+                dy = median_slope * dx
+                new_line = [x_mid - dx, y_mid - dy, x_mid + dx, y_mid + dy]
+            else:
+                # For vertical lines
+                half_height = (match[0][3] - match[0][1]) / 2
+                new_line = [x_mid, y_mid - half_height, x_mid, y_mid + half_height]
+        else:
+            # Keep the original line if it's within the deviation threshold
+            new_line = [x_mid - (match[0][2] - match[0][0])/2, 
+                        y_mid - (match[0][3] - match[0][1])/2,
+                        x_mid + (match[0][2] - match[0][0])/2, 
+                        y_mid + (match[0][3] - match[0][1])/2]
+        
+        adjusted_match.append(new_line)
+    
+    return adjusted_match
+
 def line_intersection(line1, line2):
     x1, y1, x2, y2 = line1
     x3, y3, x4, y4 = line2
@@ -441,7 +409,7 @@ def line_intersection(line1, line2):
     py = ((x1*y2 - y1*x2) * (y3 - y4) - (y1 - y2) * (x3*y4 - y3*x4)) / det
     return int(px), int(py)
 
-def four_point_transform(image, pts):
+def four_point_transform(image, pts, padding_percentage=0.15):
     rect = np.array(pts, dtype="float32")
     (tl, tr, br, bl) = rect
 
@@ -455,18 +423,155 @@ def four_point_transform(image, pts):
     heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
     maxHeight = max(int(heightA), int(heightB))
 
-    # Construct set of destination points
+    # Calculate padding
+    padding = int(maxHeight * padding_percentage)
+    padded_height = maxHeight + 2 * padding
+
+    # Construct set of destination points with padding
     dst = np.array([
-        [0, 0],
-        [maxWidth - 1, 0],
-        [maxWidth - 1, maxHeight - 1],
-        [0, maxHeight - 1]], dtype="float32")
+        [0, padding],
+        [maxWidth - 1, padding],
+        [maxWidth - 1, padded_height - padding - 1],
+        [0, padded_height - padding - 1]], dtype="float32")
 
     # Compute the perspective transform matrix and apply it
     M = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
+    warped = cv2.warpPerspective(image, M, (maxWidth, padded_height))
 
     return warped
+
+def remove_vertical_lines(binary_image):
+    """
+    Remove vertical lines from a binary image to avoid interference with histogram calculations.
+    """
+    # Ensure the image is large enough for processing
+    min_height = 100  # Minimum height to apply vertical line removal
+    if binary_image.shape[0] < min_height:
+        return binary_image  # Return original image if too small
+
+    # Create a kernel for vertical lines
+    kernel_height = max(1, binary_image.shape[0] // 100)
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, kernel_height))
+    
+    # Detect vertical lines
+    detected_lines = cv2.morphologyEx(binary_image, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+    # Subtract detected lines from the binary image
+    processed_image = cv2.subtract(binary_image, detected_lines)
+    return processed_image
+
+def adjust_cell_boundaries(cell_image):
+    """
+    Adjust the top and bottom boundaries of the cell image to fully contain the number without cutting it off.
+    Uses a more lenient dynamic threshold based on image statistics.
+    """
+    logger.debug("Starting boundary adjustment for cell")
+    # Convert to grayscale
+    gray = cv2.cvtColor(cell_image, cv2.COLOR_BGR2GRAY)
+    
+    # Calculate image statistics
+    mean_intensity = np.mean(gray)
+    std_intensity = np.std(gray)
+    
+    # Calculate dynamic threshold for binary image
+    # Adjusted to be more lenient (closer to the mean)
+    dynamic_threshold = mean_intensity - 0.8 * std_intensity
+    dynamic_threshold = max(0, min(255, dynamic_threshold))  # Ensure it's within [0, 255]
+    
+    logger.debug(f"Dynamic threshold for binary image: {dynamic_threshold}")
+    
+    # Apply threshold to get binary image
+    _, binary = cv2.threshold(gray, dynamic_threshold, 255, cv2.THRESH_BINARY_INV)
+    
+    try:
+        # Optionally remove vertical lines
+        binary = remove_vertical_lines(binary)
+    except Exception as e:
+        logger.warning(f"Error in removing vertical lines: {e}. Proceeding with original binary image.")
+    
+    # Compute the proportion of black pixels in each row
+    black_proportion = np.sum(binary == 255, axis=1) / binary.shape[1]
+    
+    # Calculate dynamic black threshold
+    mean_black_prop = np.mean(black_proportion)
+    std_black_prop = np.std(black_proportion)
+    
+    # Adjusted to be more lenient
+    black_threshold = mean_black_prop + 0.3 * std_black_prop
+    black_threshold = max(0.01, min(0.1, black_threshold))  # Limit range to [0.01, 0.1]
+    
+    logger.debug(f"Dynamic black threshold: {black_threshold}")
+    
+    # Find rows where the proportion of black pixels is above the threshold
+    black_rows = black_proportion > black_threshold
+
+    # Log the black proportion per row for debugging
+    for idx, prop in enumerate(black_proportion):
+        bars = '|' * int(prop * 20)  # Visual representation
+        spaces = '-' * (20 - int(prop * 20))
+        row_type = 'Black' if black_rows[idx] else 'White'
+        logger.debug(f"Row {idx}: {row_type} {bars}{spaces}")
+
+    # Find contiguous regions of black rows
+    labeled_array, num_features = label(black_rows)
+    # If no black regions are found, return None
+    if num_features == 0:
+        logger.debug("No black regions found in cell.")
+        return None
+
+    # Find the largest contiguous region (the main content)
+    sizes = np.bincount(labeled_array.ravel())
+    sizes[0] = 0  # Background is label 0
+    max_label = np.argmax(sizes)
+    max_size = sizes[max_label]
+    main_region = labeled_array == max_label
+    main_indices = np.where(main_region)[0]
+    top_row = main_indices[0]
+    bottom_row = main_indices[-1]
+
+    logger.debug(f"Main black region size: {max_size} rows (from row {top_row} to row {bottom_row})")
+
+    # threshold of rows required based on number of rows
+    min_rows = max(int(.15 * binary.shape[0]), 7)  # At least 7 rows or 15% of image height
+
+    # If the largest cluster is smaller than the minimum, return None
+    if max_size < min_rows:
+        logger.debug(f"Largest black region is less than {min_rows} rows. Ignoring cell.")
+        return None
+
+    # Now, check for at least two white rows above and below
+    min_white_rows = 2
+
+    # Check if the top row has two white rows above it
+    if top_row - min_white_rows < 0:
+        # Check if the main region takes up at least 30% of the image height
+        if (bottom_row - top_row) / binary.shape[0] > 0.3:
+            adjusted_top = 0
+        else:
+            logger.debug("Not enough white rows above the main region. Ignoring cell.")
+            return None
+    else:
+        adjusted_top = top_row - min_white_rows
+
+    # Check if the bottom row has two white rows below it
+    if bottom_row + min_white_rows >= binary.shape[0]:
+        if (bottom_row - top_row) / binary.shape[0] > 0.3:
+            adjusted_bottom = binary.shape[0]
+        else:
+            logger.debug("Not enough white rows below the main region. Ignoring cell.")
+            return None
+    else:
+        adjusted_bottom = bottom_row + min_white_rows
+
+    logger.debug(f"Adjusted content region: adjusted_top={adjusted_top}, adjusted_bottom={adjusted_bottom}")
+
+    # Crop the image
+    adjusted_image = cell_image[adjusted_top:adjusted_bottom, :]
+
+    # padded_image = add_white_padding(adjusted_image, padding_top=15, padding_bottom=15, padding_left=10, padding_right=10)
+    padded_image = adjusted_image
+
+
+    return padded_image
 
 def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_heights, output_dir):
     os.makedirs(output_dir, exist_ok=True)
@@ -489,13 +594,13 @@ def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_hei
         "Fragmentation_Bombs_Tons", "Total_Tons"
     ]
 
+    # Adjusted regions as per your instructions
     regions = [
-        ("Target_Location", 2, 0, 2, 7),
-        ("Target_Name", 3, 0, 3, 7),
-        ("Latitude", 2, 10, 2, 13),
-        ("Longitude", 2, 13, 2, 15),
-        ("Target_Code_Part1", 2, 16, 2, 16),
-        ("Target_Code_Part2", 2, 17, 2, 19),
+        ("Target_Location", 0, 0, 2, 7),
+        ("Target_Name", 3, 0, 5, 9),
+        ("Latitude", 0, 10, 5, 12),
+        ("Longitude", 0, 13, 5, 15),
+        ("Target_Code", 1, 17, 5, 21)
     ]
 
     def get_cell_polygon(row, col):
@@ -505,17 +610,60 @@ def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_hei
         bottom_left = line_intersection(vertical_lines[col], horizontal_lines[row+1])
         return [top_left, top_right, bottom_right, bottom_left]
 
-    def save_region(name, polygon):
+    def split_polygon(polygon):
+        # Calculate midpoints
+        left_midpoint = ((polygon[0][0] + polygon[3][0]) / 2, (polygon[0][1] + polygon[3][1]) / 2)
+        right_midpoint = ((polygon[1][0] + polygon[2][0]) / 2, (polygon[1][1] + polygon[2][1]) / 2)
+        
+        # Create two new polygons
+        top_polygon = [polygon[0], polygon[1], right_midpoint, left_midpoint]
+        bottom_polygon = [left_midpoint, right_midpoint, polygon[2], polygon[3]]
+        
+        return top_polygon, bottom_polygon
+
+    def save_region(name, polygon, counter, split=True, adjust_boundaries=True):
         if any(pt is None for pt in polygon):
             logger.warning(f"Invalid polygon for {name}: {polygon}")
-            return
-        region = four_point_transform(image, polygon)
-        if region.size == 0:
-            logger.warning(f"Empty region for {name}")
-            return
-        cv2.imwrite(os.path.join(output_dir, f"{name}.png"), region)
-        logger.info(f"Saved {name}.png")
+            return counter
 
+        if split:
+            top_polygon, bottom_polygon = split_polygon(polygon)
+            polygons = [top_polygon, bottom_polygon]
+        else:
+            polygons = [polygon]
+
+        for i, poly in enumerate(polygons):
+            region = four_point_transform(image, poly, padding_percentage=0.25)
+            if region.size == 0:
+                logger.warning(f"Empty region for {name} (part {i+1})")
+                continue
+
+            if adjust_boundaries:
+                # save a version of the region without adjusted boundaries for debugging
+                # cv2.imwrite(os.path.join(output_dir, f"{counter:03d}_{name}_part{i+1}_original.png"), region)
+
+                # Adjust cell boundaries
+                adjusted_region = adjust_cell_boundaries(region)
+                if adjusted_region is None:
+                    logger.info(f"No significant content found in {name} (part {i+1}). Skipping save.")
+                    continue
+            else:
+                adjusted_region = region
+
+            if split:
+                filename = f"{counter:03d}_{name}_part{i+1}.png"
+            else:
+                filename = f"{counter:03d}_{name}.png"
+
+            cv2.imwrite(os.path.join(output_dir, filename), adjusted_region)
+            logger.info(f"Saved {filename}")
+            counter += 1
+
+        return counter
+
+    counter = 1
+
+    # Process header regions without splitting or boundary adjustment
     for name, start_row, start_col, end_row, end_col in regions:
         logger.info(f"Splicing region: {name}")
         polygon = [
@@ -524,19 +672,28 @@ def splice_image(image, vertical_lines, horizontal_lines, column_widths, row_hei
             line_intersection(vertical_lines[end_col+1], horizontal_lines[end_row+1]),
             line_intersection(vertical_lines[start_col], horizontal_lines[end_row+1])
         ]
-        save_region(name, polygon)
+        counter = save_region(name, polygon, counter, split=False, adjust_boundaries=False)
 
+    # Process data cells with splitting and boundary adjustment
     for row in range(7, len(horizontal_lines) - 1):
         for col, name in enumerate(column_names):
             polygon = get_cell_polygon(row, col)
-            save_region(f"entry_{row-6}_{name}", polygon)
+            counter = save_region(f"entry_{row-6}_{name}", polygon, counter)
 
     logger.info(f"Image splicing completed. Results saved in {output_dir}")
 
-# Main script (example usage)
+# Main script
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        logger.error("No image path provided.")
+        sys.exit(1)
+
     image_path = sys.argv[1]
     image = cv2.imread(image_path)
+    if image is None:
+        logger.error(f"Could not read image at path: {image_path}")
+        sys.exit(1)
+    logger.info(f"Processing image: {image_path}")
     
     vertical_lines, horizontal_lines = detect_grid_lines(image)
     
@@ -546,29 +703,27 @@ if __name__ == "__main__":
         # , 215  # Last column (Total Tons)
     ]
     # print out the number of columns
-    print(f"Number of columns: {len(column_widths)}")
+    logger.info(f"Number of columns: {len(column_widths)}")
 
-    # row_heights = [
-    # 93, 93, 92, 89, 30,  # Rows, Blank, Target, Location, Buffer
-    # 58, 32, 55, 33, 56,  # Header Rows
-    # 90, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87  # Data Rows
-    # ]
-
+    # Adjusted row heights as per your requirements
     row_heights = [
-    93, 93, 92, 89,  # Rows, Blank, Target, Location, Buffer
-    58, 55, 56,  # Header Rows
-    90, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87  # Data Rows
+        93, 93, 92, 89,  # Rows: Blank, Target, Location, Buffer
+        58, 55, 56,      # Header Rows
+        90, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87, 87  # Data Rows
     ]
-    print(f"Number of rows: {len(row_heights)}")
-
+    logger.info(f"Number of rows: {len(row_heights)}")
 
     vertical_match, vertical_error = find_best_vertical_grid_match(vertical_lines, column_widths, image)
     horizontal_match, horizontal_error = find_best_horizontal_grid_match(horizontal_lines, row_heights, image)
+
+    # Adjust the vertical match to have the same slope
+    vertical_match = adjust_lines_to_median_slope(vertical_match)
+    horizontal_match = adjust_lines_to_median_slope(horizontal_match)
     
     visualize_results(image, vertical_match, horizontal_match)
     
-    print(f"Vertical match error: {vertical_error}")
-    print(f"Horizontal match error: {horizontal_error}")
+    logger.info(f"Vertical match error: {vertical_error}")
+    logger.info(f"Horizontal match error: {horizontal_error}")
 
     # check if the correct number of vertical and horizontal lines were found, if not exit with error code 1
     if len(vertical_match) != len(column_widths) + 1 or len(horizontal_match) != len(row_heights) + 1:
@@ -577,5 +732,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Splice the image
-    output_dir = image_path.replace('.JPG', '_output')
+    output_dir = os.path.splitext(image_path)[0] + '_output'
     splice_image(image, vertical_match, horizontal_match, column_widths, row_heights, output_dir)
